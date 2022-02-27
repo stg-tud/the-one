@@ -6,9 +6,8 @@ package input;
 
 import java.io.File;
 import java.io.FileNotFoundException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Scanner;
+import java.util.*;
+import java.util.concurrent.LinkedBlockingQueue;
 
 import util.Tuple;
 
@@ -39,16 +38,20 @@ import core.SettingsError;
 public class ExternalMovementReader {
 	/* Prefix for comment lines (lines starting with this are ignored) */
 	public static final String COMMENT_PREFIX = "#";
-	private Scanner scanner;
 	private double lastTimeStamp = -1;
-	private String lastLine;
-	private double minTime;
-	private double maxTime;
-	private double minX;
-	private double maxX;
-	private double minY;
-	private double maxY;
+	double currentTimeStamp;
+	String currentId;
+	double currentX;
+	double currentY;
+	private String currentLine;
+	private final double minTime;
+	private final double maxTime;
+	private final double minX;
+	private final double maxX;
+	private final double minY;
+	private final double maxY;
 	private boolean normalize;
+	private final Queue<List<Tuple<String, Coord>>> movesBuffer;
 
 
 	/**
@@ -59,6 +62,7 @@ public class ExternalMovementReader {
 	public ExternalMovementReader(String inFilePath) {
 		this.normalize = true;
 		File inFile = new File(inFilePath);
+		Scanner scanner;
 		try {
 			scanner = new Scanner(inFile);
 		} catch (FileNotFoundException e) {
@@ -67,10 +71,9 @@ public class ExternalMovementReader {
 		}
 
 		String offsets = scanner.nextLine();
-		Scanner lineScan = null;
 
-		try {
-			lineScan = new Scanner(offsets);
+		// read in the first line which contains min and max values for time, x, and y
+		try (Scanner lineScan = new Scanner(offsets)) {
 			minTime = lineScan.nextDouble();
 			maxTime = lineScan.nextDouble();
 			minX = lineScan.nextDouble();
@@ -80,13 +83,37 @@ public class ExternalMovementReader {
 		} catch (Exception e) {
 			throw new SettingsError("Invalid offset line '" + offsets + "'");
 		}
-		finally {
-			if (lineScan != null) {
-				lineScan.close();
-			}
+
+		// ---------------------------------------------------------------------------------------------
+		// read in the rest of the file and keep it in the movesBuffer
+
+		ArrayList<Tuple<String, Coord>> currentTimeStampMoves = new ArrayList<>();
+		movesBuffer = new LinkedBlockingQueue<>();
+
+		// if movements file has no values except header we skip the rest of the constructor
+		if (!scanner.hasNextLine()) {
+			return;
 		}
 
-		lastLine = scanner.nextLine();
+		while (scanner.hasNextLine()) {
+			currentLine = scanner.nextLine();
+
+			if (currentLine.trim().length() == 0 || currentLine.startsWith(COMMENT_PREFIX)) {
+				continue; /* skip empty and comment lines */
+			}
+			Scanner lineScan = new Scanner(currentLine);
+			parseLine(lineScan);
+
+			// if the new line contains a new timestamp, add list of tuples for
+			// previous timestamp to buffer
+			if (lastTimeStamp != currentTimeStamp && !currentTimeStampMoves.isEmpty()) {
+				movesBuffer.add(currentTimeStampMoves);
+				currentTimeStampMoves.clear();
+			}
+			currentTimeStampMoves.add(new Tuple<>(currentId, new Coord(currentX, currentY)));
+			lastTimeStamp = currentTimeStamp;
+		}
+		// ---------------------------------------------------------------------------------------------
 	}
 
 	/**
@@ -102,66 +129,10 @@ public class ExternalMovementReader {
 	/**
 	 * Reads all new id-coordinate tuples that belong to the same time instance
 	 * @return A list of tuples or empty list if there were no more moves
-	 * @throws SettingError if an invalid line was read
 	 */
 	public List<Tuple<String, Coord>> readNextMovements() {
-		ArrayList<Tuple<String, Coord>> moves =
-			new ArrayList<Tuple<String, Coord>>();
-
-		if (!scanner.hasNextLine()) {
-			return moves;
-		}
-
-		Scanner lineScan = new Scanner(lastLine);
-		double time = lineScan.nextDouble();
-		String id = lineScan.next();
-		double x = lineScan.nextDouble();
-		double y = lineScan.nextDouble();
-
-		if (normalize) {
-			time -= minTime;
-			x -= minX;
-			y -= minY;
-		}
-
-		lastTimeStamp = time;
-
-		while (scanner.hasNextLine() && lastTimeStamp == time) {
-			lastLine = scanner.nextLine();
-
-			if (lastLine.trim().length() == 0 ||
-					lastLine.startsWith(COMMENT_PREFIX)) {
-				continue; /* skip empty and comment lines */
-			}
-
-			// add previous line's tuple
-			moves.add(new Tuple<String, Coord>(id, new Coord(x,y)));
-
-			lineScan = new Scanner(lastLine);
-
-			try {
-				time = lineScan.nextDouble();
-				id = lineScan.next();
-				x = lineScan.nextDouble();
-				y = lineScan.nextDouble();
-			} catch (Exception e) {
-				throw new SettingsError("Invalid line '" + lastLine + "'");
-			} finally {
-				lineScan.close();
-			}
-
-			if (normalize) {
-				time -= minTime;
-				x -= minX;
-				y -= minY;
-			}
-		}
-
-		if (!scanner.hasNextLine()) {	// add the last tuple of the file
-			moves.add(new Tuple<String, Coord>(id, new Coord(x,y)));
-		}
-
-		return moves;
+		if (!movesBuffer.isEmpty()) return movesBuffer.poll();
+		return new ArrayList<>();
 	}
 
 	/**
@@ -221,4 +192,27 @@ public class ExternalMovementReader {
 		return minY;
 	}
 
+	/**
+	 * Parses the values of lineScan and writes them into the correpsonding o
+	 * @param lineScan Line from file to parse
+	 */
+	private void parseLine(Scanner lineScan) {
+		try {
+			currentTimeStamp = lineScan.nextDouble();
+			currentId = lineScan.next();
+			currentX = lineScan.nextDouble();
+			currentY = lineScan.nextDouble();
+		} catch (Exception e) {
+			throw new SettingsError("Invalid line '" + currentLine + "'");
+		} finally {
+			lineScan.close();
+		}
+
+		if (normalize) {
+			currentTimeStamp -= minTime;
+			currentX -= minX;
+			currentY -= minY;
+		}
+
+	}
 }
