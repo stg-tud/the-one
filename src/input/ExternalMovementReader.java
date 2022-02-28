@@ -41,7 +41,6 @@ import core.SettingsError;
 public class ExternalMovementReader {
 	/* Prefix for comment lines (lines starting with this are ignored) */
 	public static final String COMMENT_PREFIX = "#";
-	private double lastTimeStamp = -1;
 	private double currentTimeStamp;
 	private String currentLine;
 	private final double minTime;
@@ -56,7 +55,7 @@ public class ExternalMovementReader {
 	// timestamp in the movesBuffer along with the associated data:
 	// movesBuffer structure: (timestamp, [(node_id1, coord1), (node_id2, coord2), ...])
 	private final BlockingQueue<Tuple<Double, List<Tuple<String, Coord>>>> movesBuffer;
-	private Double lastReturnedTimestamp = lastTimeStamp;
+	private double lastReturnedTimestamp = -1;
 	private boolean ingestDone = false;
 
 	/**
@@ -93,7 +92,7 @@ public class ExternalMovementReader {
 		// read in the rest of the file and push it into the movesBuffer
 		System.out.println("Reading in " + inFilePath);
 		movesBuffer = new LinkedBlockingQueue<>();
-
+		currentTimeStamp = -1;
 		Executors.newSingleThreadExecutor().submit(() -> readInFile(scanner));
 
 		// ---------------------------------------------------------------------------------------------
@@ -102,17 +101,31 @@ public class ExternalMovementReader {
 
 	private void readInFile(Scanner scanner) {
 		ArrayList<Tuple<String, Coord>> currentTimeStampMoves = new ArrayList<>();
-		// if movements file has no values except header we skip the rest of the constructor
+
+		// read in first line and set up timestamp variables
 		if (!scanner.hasNextLine()) {
-			return;
+			ingestDone = true;
+			return; /* if movements file has no values except header we're done*/
 		}
+		currentLine = scanner.nextLine();
+		while (emptyOrCommentedOutLine(currentLine)) {
+			currentLine = scanner.nextLine();
+		};
+		Scanner lineScan = new Scanner(currentLine);
+		currentTimeStampMoves.add(parseLine(lineScan));
+		double lastTimeStamp = currentTimeStamp;
 
 		while (scanner.hasNextLine()) {
 			currentLine = scanner.nextLine();
 
-			if (currentLine.trim().length() == 0 || currentLine.startsWith(COMMENT_PREFIX)) {
+			if (emptyOrCommentedOutLine(currentLine)) {
 				continue; /* skip empty and comment lines */
 			}
+
+			lineScan = new Scanner(currentLine);
+			lastTimeStamp = currentTimeStamp;
+			// parseLine updates currentTimeStamp hooray for side-effects
+			Tuple<String, Coord> currentTuple = parseLine(lineScan);
 
 			// if the new line contains a new timestamp, add list of tuples for
 			// previous timestamp to buffer
@@ -120,16 +133,18 @@ public class ExternalMovementReader {
 				movesBuffer.add(new Tuple<>(lastTimeStamp, currentTimeStampMoves));
 				currentTimeStampMoves = new ArrayList<>();
 			}
-			Scanner lineScan = new Scanner(currentLine);
-			lastTimeStamp = currentTimeStamp;
-			// parseLine updates currentTimeStamp hooray for side-effects:
-			currentTimeStampMoves.add(parseLine(lineScan));
+			currentTimeStampMoves.add(currentTuple);
 		}
 		// add last timestamp readings
 		if (!currentTimeStampMoves.isEmpty()) {
 			movesBuffer.add(new Tuple<>(lastTimeStamp, currentTimeStampMoves));
 		}
+		// set the flag to let readNextMovements-thread know we're done
 		ingestDone = true;
+	}
+
+	private boolean emptyOrCommentedOutLine(String line) {
+		return line.trim().length() == 0 || line.startsWith(COMMENT_PREFIX);
 	}
 
 	/**
@@ -146,11 +161,11 @@ public class ExternalMovementReader {
 	 * Reads all new id-coordinate tuples that belong to the same time instance
 	 * @return A list of tuples or empty list if there were no more moves
 	 */
-	public List<Tuple<String, Coord>> readNextMovements() {
+	public synchronized List<Tuple<String, Coord>> readNextMovements() {
 		Tuple<Double, List<Tuple<String, Coord>>> nextMove = null;
 		try {
 			// poll the buffer until an element becomes available
-			while((nextMove = movesBuffer.poll(100L, TimeUnit.MILLISECONDS)) == null) {
+			while((nextMove = movesBuffer.poll(50L, TimeUnit.MILLISECONDS)) == null) {
 				if (ingestDone) break;
 			};
 		} catch (InterruptedException e) {
