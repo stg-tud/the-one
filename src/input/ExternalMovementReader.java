@@ -39,10 +39,7 @@ public class ExternalMovementReader {
 	/* Prefix for comment lines (lines starting with this are ignored) */
 	public static final String COMMENT_PREFIX = "#";
 	private double lastTimeStamp = -1;
-	double currentTimeStamp;
-	String currentId;
-	double currentX;
-	double currentY;
+	private double currentTimeStamp;
 	private String currentLine;
 	private final double minTime;
 	private final double maxTime;
@@ -113,8 +110,9 @@ public class ExternalMovementReader {
 				currentTimeStampMoves = new ArrayList<>();
 			}
 			Scanner lineScan = new Scanner(currentLine);
-			currentTimeStampMoves.add(parseLine(lineScan));
 			lastTimeStamp = currentTimeStamp;
+			// parseLine updates currentTimeStamp hooray for side-effects:
+			currentTimeStampMoves.add(parseLine(lineScan));
 		}
 		// add last timestamp readings
 		if (!currentTimeStampMoves.isEmpty()) {
