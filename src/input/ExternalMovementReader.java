@@ -51,8 +51,12 @@ public class ExternalMovementReader {
 	private final double minY;
 	private final double maxY;
 	private boolean normalize;
-	private final Queue<List<Tuple<String, Coord>>> movesBuffer;
-
+	// because we're reading in the complete data in the constructor, lastTimeStamp can no
+	// longer be used to fetch the current state of the read-in process. We store the
+	// timestamp in the movesBuffer along with the associated data:
+	// movesBuffer structure: (timestamp, [(node_id1, coord1), (node_id2, coord2), ...])
+	private final Queue<Tuple<Double, List<Tuple<String, Coord>>>> movesBuffer;
+	private Double lastReturnedTimestamp = lastTimeStamp;
 
 	/**
 	 * Constructor. Creates a new reader that reads the data from a file.
@@ -85,8 +89,8 @@ public class ExternalMovementReader {
 		}
 
 		// ---------------------------------------------------------------------------------------------
-		// read in the rest of the file and keep it in the movesBuffer
-
+		// read in the rest of the file and push it into the movesBuffer
+		System.out.println("Reading in " + inFilePath);
 		ArrayList<Tuple<String, Coord>> currentTimeStampMoves = new ArrayList<>();
 		movesBuffer = new LinkedBlockingQueue<>();
 
@@ -101,17 +105,20 @@ public class ExternalMovementReader {
 			if (currentLine.trim().length() == 0 || currentLine.startsWith(COMMENT_PREFIX)) {
 				continue; /* skip empty and comment lines */
 			}
-			Scanner lineScan = new Scanner(currentLine);
-			parseLine(lineScan);
 
 			// if the new line contains a new timestamp, add list of tuples for
 			// previous timestamp to buffer
 			if (lastTimeStamp != currentTimeStamp && !currentTimeStampMoves.isEmpty()) {
-				movesBuffer.add(currentTimeStampMoves);
-				currentTimeStampMoves.clear();
+				movesBuffer.add(new Tuple<>(lastTimeStamp, currentTimeStampMoves));
+				currentTimeStampMoves = new ArrayList<>();
 			}
-			currentTimeStampMoves.add(new Tuple<>(currentId, new Coord(currentX, currentY)));
+			Scanner lineScan = new Scanner(currentLine);
+			currentTimeStampMoves.add(parseLine(lineScan));
 			lastTimeStamp = currentTimeStamp;
+		}
+		// add last timestamp readings
+		if (!currentTimeStampMoves.isEmpty()) {
+			movesBuffer.add(new Tuple<>(lastTimeStamp, currentTimeStampMoves));
 		}
 		// ---------------------------------------------------------------------------------------------
 	}
@@ -131,7 +138,11 @@ public class ExternalMovementReader {
 	 * @return A list of tuples or empty list if there were no more moves
 	 */
 	public List<Tuple<String, Coord>> readNextMovements() {
-		if (!movesBuffer.isEmpty()) return movesBuffer.poll();
+		Tuple<Double, List<Tuple<String, Coord>>> nextMove = movesBuffer.poll();
+		if (nextMove != null) {
+			lastReturnedTimestamp = nextMove.getKey();
+			return nextMove.getValue();
+		}
 		return new ArrayList<>();
 	}
 
@@ -141,7 +152,7 @@ public class ExternalMovementReader {
 	 * @return The time stamp
 	 */
 	public double getLastTimeStamp() {
-		return lastTimeStamp;
+		return lastReturnedTimestamp;
 	}
 
 	/**
@@ -195,24 +206,25 @@ public class ExternalMovementReader {
 	/**
 	 * Parses the values of lineScan and writes them into the correpsonding o
 	 * @param lineScan Line from file to parse
+	 * @return
 	 */
-	private void parseLine(Scanner lineScan) {
+	private Tuple<String, Coord> parseLine(Scanner lineScan) {
 		try {
 			currentTimeStamp = lineScan.nextDouble();
-			currentId = lineScan.next();
-			currentX = lineScan.nextDouble();
-			currentY = lineScan.nextDouble();
+			String id = lineScan.next();
+			double x = lineScan.nextDouble();
+			double y = lineScan.nextDouble();
+			if (normalize) {
+				currentTimeStamp -= minTime;
+				x -= minX;
+				y -= minY;
+			}
+			return new Tuple<>(id, new Coord(x, y));
+
 		} catch (Exception e) {
 			throw new SettingsError("Invalid line '" + currentLine + "'");
 		} finally {
 			lineScan.close();
 		}
-
-		if (normalize) {
-			currentTimeStamp -= minTime;
-			currentX -= minX;
-			currentY -= minY;
-		}
-
 	}
 }
