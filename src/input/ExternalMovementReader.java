@@ -7,7 +7,10 @@ package input;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.util.*;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 import util.Tuple;
 
@@ -52,8 +55,9 @@ public class ExternalMovementReader {
 	// longer be used to fetch the current state of the read-in process. We store the
 	// timestamp in the movesBuffer along with the associated data:
 	// movesBuffer structure: (timestamp, [(node_id1, coord1), (node_id2, coord2), ...])
-	private final Queue<Tuple<Double, List<Tuple<String, Coord>>>> movesBuffer;
+	private final BlockingQueue<Tuple<Double, List<Tuple<String, Coord>>>> movesBuffer;
 	private Double lastReturnedTimestamp = lastTimeStamp;
+	private boolean ingestDone = false;
 
 	/**
 	 * Constructor. Creates a new reader that reads the data from a file.
@@ -88,9 +92,16 @@ public class ExternalMovementReader {
 		// ---------------------------------------------------------------------------------------------
 		// read in the rest of the file and push it into the movesBuffer
 		System.out.println("Reading in " + inFilePath);
-		ArrayList<Tuple<String, Coord>> currentTimeStampMoves = new ArrayList<>();
 		movesBuffer = new LinkedBlockingQueue<>();
 
+		Executors.newSingleThreadExecutor().submit(() -> readInFile(scanner));
+
+		// ---------------------------------------------------------------------------------------------
+	}
+
+
+	private void readInFile(Scanner scanner) {
+		ArrayList<Tuple<String, Coord>> currentTimeStampMoves = new ArrayList<>();
 		// if movements file has no values except header we skip the rest of the constructor
 		if (!scanner.hasNextLine()) {
 			return;
@@ -118,7 +129,7 @@ public class ExternalMovementReader {
 		if (!currentTimeStampMoves.isEmpty()) {
 			movesBuffer.add(new Tuple<>(lastTimeStamp, currentTimeStampMoves));
 		}
-		// ---------------------------------------------------------------------------------------------
+		ingestDone = true;
 	}
 
 	/**
@@ -136,7 +147,15 @@ public class ExternalMovementReader {
 	 * @return A list of tuples or empty list if there were no more moves
 	 */
 	public List<Tuple<String, Coord>> readNextMovements() {
-		Tuple<Double, List<Tuple<String, Coord>>> nextMove = movesBuffer.poll();
+		Tuple<Double, List<Tuple<String, Coord>>> nextMove = null;
+		try {
+			// poll the buffer until an element becomes available
+			while((nextMove = movesBuffer.poll(100L, TimeUnit.MILLISECONDS)) == null) {
+				if (ingestDone) break;
+			};
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		}
 		if (nextMove != null) {
 			lastReturnedTimestamp = nextMove.getKey();
 			return nextMove.getValue();
