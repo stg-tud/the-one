@@ -111,8 +111,7 @@ public class ExternalMovementReader {
 		while (emptyOrCommentedOutLine(currentLine)) {
 			currentLine = scanner.nextLine();
 		};
-		Scanner lineScan = new Scanner(currentLine);
-		currentTimeStampMoves.add(parseLine(lineScan));
+		currentTimeStampMoves.add(parseLine(currentLine));
 		double lastTimeStamp = currentTimeStamp;
 
 		while (scanner.hasNextLine()) {
@@ -122,10 +121,9 @@ public class ExternalMovementReader {
 				continue; /* skip empty and comment lines */
 			}
 
-			lineScan = new Scanner(currentLine);
 			lastTimeStamp = currentTimeStamp;
 			// parseLine updates currentTimeStamp hooray for side-effects
-			Tuple<String, Coord> currentTuple = parseLine(lineScan);
+			Tuple<String, Coord> currentTuple = parseLine(currentLine);
 
 			// if the new line contains a new timestamp, add list of tuples for
 			// previous timestamp to buffer
@@ -237,26 +235,21 @@ public class ExternalMovementReader {
 
 	/**
 	 * Parses the values of lineScan and writes them into the correpsonding o
-	 * @param lineScan Line from file to parse
+	 * @param line Line from file to parse
 	 * @return
 	 */
-	private Tuple<String, Coord> parseLine(Scanner lineScan) {
-		try {
-			currentTimeStamp = lineScan.nextDouble();
-			String id = lineScan.next();
-			double x = lineScan.nextDouble();
-			double y = lineScan.nextDouble();
-			if (normalize) {
-				currentTimeStamp -= minTime;
-				x -= minX;
-				y -= minY;
-			}
-			return new Tuple<>(id, new Coord(x, y));
-
-		} catch (Exception e) {
-			throw new SettingsError("Invalid line '" + currentLine + "'");
-		} finally {
-			lineScan.close();
+	private Tuple<String, Coord> parseLine(String line) {
+		String[] splitLine = line.split(" ");
+		if (splitLine.length != 4) throw new SettingsError("Invalid line '" + currentLine + "'");
+		currentTimeStamp = Double.parseDouble(splitLine[0]);
+		String id = splitLine[1];
+		double x = Double.parseDouble(splitLine[2]);
+		double y = Double.parseDouble(splitLine[3]);
+		if (normalize) {
+			currentTimeStamp -= minTime;
+			x -= minX;
+			y -= minY;
 		}
+		return new Tuple<>(id, new Coord(x, y));
 	}
 }
