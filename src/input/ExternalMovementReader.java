@@ -236,7 +236,7 @@ public class ExternalMovementReader {
 	/**
 	 * Parses the values of lineScan and writes them into the correpsonding o
 	 * @param line Line from file to parse
-	 * @return
+	 * @return Tuple of read-in line
 	 */
 	private Tuple<String, Coord> parseLine(String line) {
 		String[] splitLine = line.split(" ");
