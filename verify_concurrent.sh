@@ -1,6 +1,5 @@
 #!/bin/bash
 
-
 # set up
 # set -euxo pipefail
 set -e
@@ -42,7 +41,7 @@ mv *.txt ./ref/;
 
 cd "${program_dir}"
 echo "Checking out multicore branch"
-git checkout speedup/read-external-movement-once &> /dev/null
+git checkout multicore-clean &> /dev/null
 echo "--- Building multicore implementation"
 ./compile.sh &> /dev/null
 
