@@ -7,10 +7,7 @@ package input;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.util.*;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.Executors;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 import util.Tuple;
 
@@ -41,6 +38,9 @@ import core.SettingsError;
 public class ExternalMovementReader {
 	/* Prefix for comment lines (lines starting with this are ignored) */
 	public static final String COMMENT_PREFIX = "#";
+	/* min and max size for buffer during ingestion phase */
+	public static final int MIN_READ_AHEAD = 2000;
+	public static final int MAX_READ_AHEAD = 20000;
 	private double currentTimeStamp;
 	private String currentLine;
 	private final double minTime;
@@ -55,6 +55,8 @@ public class ExternalMovementReader {
 	// timestamp in the movesBuffer along with the associated data:
 	// movesBuffer structure: (timestamp, [(node_id1, coord1), (node_id2, coord2), ...])
 	private final BlockingQueue<Tuple<Double, List<Tuple<String, Coord>>>> movesBuffer;
+	private CountDownLatch readPossible;
+	private boolean enableCountDownLatch = false;
 	private double lastReturnedTimestamp = -1;
 	private boolean ingestDone = false;
 
@@ -115,6 +117,17 @@ public class ExternalMovementReader {
 		double lastTimeStamp = currentTimeStamp;
 
 		while (scanner.hasNextLine()) {
+			// manage countdown to ensure we're in the accepted buffer size range
+			if (movesBuffer.size() >= MAX_READ_AHEAD) {
+				readPossible = new CountDownLatch(MAX_READ_AHEAD-MIN_READ_AHEAD);
+				enableCountDownLatch = true;
+				try {
+					readPossible.await();
+				} catch (InterruptedException e) {
+					System.out.println("ERROR: Data ingestion interrupted.");
+					e.printStackTrace();
+				}
+			}
 			currentLine = scanner.nextLine();
 
 			if (emptyOrCommentedOutLine(currentLine)) {
@@ -169,6 +182,8 @@ public class ExternalMovementReader {
 		} catch (InterruptedException e) {
 			e.printStackTrace();
 		}
+		if (enableCountDownLatch)
+			readPossible.countDown();
 		if (nextMove != null) {
 			lastReturnedTimestamp = nextMove.getKey();
 			return nextMove.getValue();
@@ -236,7 +251,7 @@ public class ExternalMovementReader {
 	/**
 	 * Parses the values of lineScan and writes them into the correpsonding o
 	 * @param line Line from file to parse
-	 * @return
+	 * @return tuple of node movement
 	 */
 	private Tuple<String, Coord> parseLine(String line) {
 		String[] splitLine = line.split(" ");
