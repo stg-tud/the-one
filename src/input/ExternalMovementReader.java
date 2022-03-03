@@ -4,11 +4,8 @@
  */
 package input;
 
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileNotFoundException;
-import java.io.FileReader;
-import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Executors;
@@ -69,93 +66,56 @@ public class ExternalMovementReader {
 	public ExternalMovementReader(String inFilePath) {
 		this.normalize = true;
 		File inFile = new File(inFilePath);
-		BufferedReader reader;
+		Scanner scanner;
 		try {
-			reader = new BufferedReader(new FileReader(inFile));
+			scanner = new Scanner(inFile);
 		} catch (FileNotFoundException e) {
 			throw new SettingsError("Couldn't find external movement input " +
 					"file " + inFile);
 		}
 
-		String offsets;
-		try {
-			offsets = reader.readLine();
-		} catch (IOException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-			throw new NoSuchElementException("nextLine couldnt be found when reading the file");
-		} //scanner.nextLine();
+		String offsets = scanner.nextLine();
 
 		// read in the first line which contains min and max values for time, x, and y
-
-		String[] offsetValues = offsets.split(" ");
-		if (offsetValues.length != 6 && offsetValues.length != 8) {
+		try (Scanner lineScan = new Scanner(offsets)) {
+			minTime = lineScan.nextDouble();
+			maxTime = lineScan.nextDouble();
+			minX = lineScan.nextDouble();
+			maxX = lineScan.nextDouble();
+			minY = lineScan.nextDouble();
+			maxY = lineScan.nextDouble();
+		} catch (Exception e) {
 			throw new SettingsError("Invalid offset line '" + offsets + "'");
 		}
-		minTime = Double.parseDouble(offsetValues[0]);
-		maxTime = Double.parseDouble(offsetValues[1]);
-		minX = Double.parseDouble(offsetValues[2]);
-		maxX = Double.parseDouble(offsetValues[3]);
-		minY = Double.parseDouble(offsetValues[4]);
-		maxY = Double.parseDouble(offsetValues[5]);
-
-		// try (Scanner lineScan = new Scanner(offsets)) {
-		// 	minTime = lineScan.nextDouble();
-		// 	maxTime = lineScan.nextDouble();
-		// 	minX = lineScan.nextDouble();
-		// 	maxX = lineScan.nextDouble();
-		// 	minY = lineScan.nextDouble();
-		// 	maxY = lineScan.nextDouble();
-		// } catch (Exception e) {
-		// 	throw new SettingsError("Invalid offset line '" + offsets + "'");
-		// }
 
 		// ---------------------------------------------------------------------------------------------
 		// read in the rest of the file and push it into the movesBuffer
 		System.out.println("Reading in " + inFilePath);
 		movesBuffer = new LinkedBlockingQueue<>();
 		currentTimeStamp = -1;
-		Executors.newSingleThreadExecutor().submit(() -> readInFile(reader));
+		Executors.newSingleThreadExecutor().submit(() -> readInFile(scanner));
 
 		// ---------------------------------------------------------------------------------------------
 	}
 
 
-	private void readInFile(BufferedReader reader) {
+	private void readInFile(Scanner scanner) {
 		ArrayList<Tuple<String, Coord>> currentTimeStampMoves = new ArrayList<>();
 
 		// read in first line and set up timestamp variables
-		if (!hasNextLine(reader)) {
+		if (!scanner.hasNextLine()) {
 			ingestDone = true;
 			return; /* if movements file has no values except header we're done*/
 		}
-		try {
-			currentLine = reader.readLine();
-		} catch (IOException e1) {
-			// TODO Auto-generated catch block
-			e1.printStackTrace();
-			throw new NoSuchElementException("nextLine couldnt be found when reading the file");
-		}
+		currentLine = scanner.nextLine();
 		while (emptyOrCommentedOutLine(currentLine)) {
-			try {
-				currentLine = reader.readLine();
-			} catch (IOException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-				throw new NoSuchElementException("nextLine couldnt be found when reading the file");
-			}
+			currentLine = scanner.nextLine();
 		};
 		currentTimeStampMoves.add(parseLine(currentLine));
 		double lastTimeStamp = currentTimeStamp;
 
-		while (hasNextLine(reader)) {
-			try {
-				currentLine = reader.readLine();
-			} catch (IOException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-				throw new NoSuchElementException("nextLine couldnt be found when reading the file");
-			}
+		while (scanner.hasNextLine()) {
+			currentLine = scanner.nextLine();
 
 			if (emptyOrCommentedOutLine(currentLine)) {
 				continue; /* skip empty and comment lines */
@@ -291,25 +251,5 @@ public class ExternalMovementReader {
 			y -= minY;
 		}
 		return new Tuple<>(id, new Coord(x, y));
-	}
-
-	/**
-	 * bufferedReader natively has no such method so this is a workaround for better readability.
-	 * checks if the reader has a next line by reading it and checking if its null, then resetting it
-	 * @param buffReader the reader that should be checked
-	 * @return if the reader has a next line thats not null
-	 */
-	private boolean hasNextLine(BufferedReader buffReader) {
-		boolean hasNextLine = true;
-		try {
-			buffReader.mark(500);
-			if (buffReader.readLine() == null) {
-				hasNextLine = false;
-			}
-			buffReader.reset();
-		} catch (IOException e) {
-			//TODO: handle exception
-		}
-		return hasNextLine;
 	}
 }
