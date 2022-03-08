@@ -9,6 +9,7 @@ import java.io.FileNotFoundException;
 import java.util.*;
 import java.util.concurrent.*;
 
+import movement.ExternalMovement;
 import util.Tuple;
 
 import core.Coord;
@@ -38,9 +39,7 @@ import core.SettingsError;
 public class ExternalMovementReader {
 	/* Prefix for comment lines (lines starting with this are ignored) */
 	public static final String COMMENT_PREFIX = "#";
-	/* min and max size for buffer during ingestion phase */
-	public static final int MIN_READ_AHEAD = 2000;
-	public static final int MAX_READ_AHEAD = 20000;
+
 	private double currentTimeStamp;
 	private String currentLine;
 	private final double minTime;
@@ -50,23 +49,29 @@ public class ExternalMovementReader {
 	private final double minY;
 	private final double maxY;
 	private boolean normalize;
-	// because we're reading in the complete data in the constructor, lastTimeStamp can no
-	// longer be used to fetch the current state of the read-in process. We store the
-	// timestamp in the movesBuffer along with the associated data:
-	// movesBuffer structure: (timestamp, [(node_id1, coord1), (node_id2, coord2), ...])
+
+	/* following fields are for handling async ingestion of movement files */
+	/* movesBuffer structure: (timestamp, [(node_id1, coord1), (node_id2, coord2), ...]) */
+	private final int readAheadBufferMin;
+	private final int readAheadBufferMax;
 	private final BlockingQueue<Tuple<Double, List<Tuple<String, Coord>>>> movesBuffer;
-	private CountDownLatch readPossible;
-	private boolean enableCountDownLatch = false;
+	private CountDownLatch continueReadAhead;
+	private final ExecutorService readAheadExecutor;
 	private double lastReturnedTimestamp = -1;
-	private boolean ingestDone = false;
+	private boolean readInDone = false;
+	private final double endTime;
 
 	/**
 	 * Constructor. Creates a new reader that reads the data from a file.
 	 * @param inFilePath Path to the file where the data is read
+	 * @param endTime End-time of the scenario
 	 * @throws SettingsError if the file wasn't found
 	 */
-	public ExternalMovementReader(String inFilePath) {
+	public ExternalMovementReader(String inFilePath, double endTime, int readAheadBufferMin, int readAheadBufferMax) {
 		this.normalize = true;
+		this.endTime = endTime;
+		this.readAheadBufferMin = readAheadBufferMin;
+		this.readAheadBufferMax = readAheadBufferMax;
 		File inFile = new File(inFilePath);
 		Scanner scanner;
 		try {
@@ -78,7 +83,7 @@ public class ExternalMovementReader {
 
 		String offsets = scanner.nextLine();
 
-		// read in the first line which contains min and max values for time, x, and y
+		/* read in the first line which contains min and max values for time, x, and y */
 		try (Scanner lineScan = new Scanner(offsets)) {
 			minTime = lineScan.nextDouble();
 			maxTime = lineScan.nextDouble();
@@ -90,24 +95,35 @@ public class ExternalMovementReader {
 			throw new SettingsError("Invalid offset line '" + offsets + "'");
 		}
 
-		// ---------------------------------------------------------------------------------------------
-		// read in the rest of the file and push it into the movesBuffer
-		System.out.println("Reading in " + inFilePath);
+		/* read in the rest of the file and push it into the movesBuffer in a separate thread */
 		movesBuffer = new LinkedBlockingQueue<>();
 		currentTimeStamp = -1;
-		Executors.newSingleThreadExecutor().submit(() -> readInFile(scanner));
-
-		// ---------------------------------------------------------------------------------------------
+		continueReadAhead = new CountDownLatch(0);
+		readAheadExecutor = Executors.newSingleThreadExecutor();
+		readAheadExecutor.submit(() -> readInFile(scanner));
 	}
 
+	/**
+	 * Legacy constructor. Calls constructor with default endTime
+	 * @param inFilePath Path to the file where the data is read
+	 */
+	public ExternalMovementReader(String inFilePath) {
+		this(inFilePath, Double.MAX_VALUE,
+				ExternalMovement.DEF_READ_AHEAD_BUFFER_MIN,
+				ExternalMovement.DEF_READ_AHEAD_BUFFER_MAX);
+	}
 
+	/**
+	 * Reads in the movements file in chunks and writes data into the buffer
+	 * @param scanner Scanner that is pointing to the first line of movements data
+	 */
 	private void readInFile(Scanner scanner) {
 		ArrayList<Tuple<String, Coord>> currentTimeStampMoves = new ArrayList<>();
 
-		// read in first line and set up timestamp variables
+		/* read in first line and set up timestamp variables */
 		if (!scanner.hasNextLine()) {
-			ingestDone = true;
-			return; /* if movements file has no values except header we're done*/
+			readInDone = true;
+			return;
 		}
 		currentLine = scanner.nextLine();
 		while (emptyOrCommentedOutLine(currentLine)) {
@@ -117,12 +133,11 @@ public class ExternalMovementReader {
 		double lastTimeStamp = currentTimeStamp;
 
 		while (scanner.hasNextLine()) {
-			// manage countdown to ensure we're in the accepted buffer size range
-			if (movesBuffer.size() >= MAX_READ_AHEAD) {
-				readPossible = new CountDownLatch(MAX_READ_AHEAD-MIN_READ_AHEAD);
-				enableCountDownLatch = true;
+			/* manage countdown to ensure we're in the accepted buffer size range */
+			if (movesBuffer.size() >= readAheadBufferMax) {
+				continueReadAhead = new CountDownLatch(readAheadBufferMax-readAheadBufferMin);
 				try {
-					readPossible.await();
+					continueReadAhead.await();
 				} catch (InterruptedException e) {
 					System.out.println("ERROR: Data ingestion interrupted.");
 					e.printStackTrace();
@@ -135,25 +150,33 @@ public class ExternalMovementReader {
 			}
 
 			lastTimeStamp = currentTimeStamp;
-			// parseLine updates currentTimeStamp hooray for side-effects
+			/* parseLine updates currentTimeStamp */
 			Tuple<String, Coord> currentTuple = parseLine(currentLine);
 
-			// if the new line contains a new timestamp, add list of tuples for
-			// previous timestamp to buffer
+			/* if the new line contains a new timestamp, add list of tuples for
+			   previous timestamp to buffer */
 			if (lastTimeStamp != currentTimeStamp && !currentTimeStampMoves.isEmpty()) {
 				movesBuffer.add(new Tuple<>(lastTimeStamp, currentTimeStampMoves));
 				currentTimeStampMoves = new ArrayList<>();
 			}
 			currentTimeStampMoves.add(currentTuple);
+			/* break if we've reached the scenario endTime */
+			if (currentTimeStamp > endTime) break;
 		}
-		// add last timestamp readings
+		/* add last timestamp readings */
 		if (!currentTimeStampMoves.isEmpty()) {
 			movesBuffer.add(new Tuple<>(lastTimeStamp, currentTimeStampMoves));
 		}
-		// set the flag to let readNextMovements-thread know we're done
-		ingestDone = true;
+		/* set the flag to let readNextMovements-thread know we're done */
+		readInDone = true;
+		readAheadExecutor.shutdownNow();
 	}
 
+	/**
+	 * Checks if passed String is an empty or commented-out line
+	 * @param line Line to check
+	 * @return true if line is empty or commented-out, false otherwise
+	 */
 	private boolean emptyOrCommentedOutLine(String line) {
 		return line.trim().length() == 0 || line.startsWith(COMMENT_PREFIX);
 	}
@@ -177,13 +200,12 @@ public class ExternalMovementReader {
 		try {
 			// poll the buffer until an element becomes available
 			while((nextMove = movesBuffer.poll(50L, TimeUnit.MILLISECONDS)) == null) {
-				if (ingestDone) break;
+				if (readInDone) break;
 			};
 		} catch (InterruptedException e) {
 			e.printStackTrace();
 		}
-		if (enableCountDownLatch)
-			readPossible.countDown();
+		continueReadAhead.countDown();
 		if (nextMove != null) {
 			lastReturnedTimestamp = nextMove.getKey();
 			return nextMove.getValue();
@@ -249,7 +271,7 @@ public class ExternalMovementReader {
 	}
 
 	/**
-	 * Parses the values of lineScan and writes them into the correpsonding o
+	 * Parses the values of lineScan and updates the currentTimeStamp field
 	 * @param line Line from file to parse
 	 * @return tuple of node movement
 	 */
