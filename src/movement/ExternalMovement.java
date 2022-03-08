@@ -87,13 +87,13 @@ public class ExternalMovement extends MovementModel {
 			idMapping = new HashMap<String, ExternalMovement>();
 			inputFileName = s.getSetting(MOVEMENT_FILE_S);
 
+			/* get the buffer settings */
+			int readAheadBufferMin = s.getInt(READ_AHEAD_BUFFER_MIN_S, DEF_READ_AHEAD_BUFFER_MIN);
+			int readAheadBufferMax = s.getInt(READ_AHEAD_BUFFER_MAX_S, DEF_READ_AHEAD_BUFFER_MAX);
 			/* provide the scenario endTime so the thread can terminate itself */
 			s.setNameSpace(SimScenario.SCENARIO_NS);
 			double endTime = s.getDouble(SimScenario.END_TIME_S);
-			/* get the buffer settings */
-			s.setNameSpace(World.OPTIMIZATION_SETTINGS_NS);
-			int readAheadBufferMin = s.getInt(READ_AHEAD_BUFFER_MIN_S, DEF_READ_AHEAD_BUFFER_MIN);
-			int readAheadBufferMax = s.getInt(READ_AHEAD_BUFFER_MAX_S, DEF_READ_AHEAD_BUFFER_MAX);
+
 			reader = new ExternalMovementReader(inputFileName, endTime, readAheadBufferMin, readAheadBufferMax);
 
 			initLocations = reader.readNextMovements();
