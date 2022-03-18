@@ -10,15 +10,6 @@ doc/stylesheet.css
 doc/resources/*.gif
 doc/package-list
 
-# IntelliJ locations
-/.idea/
-/out/
-the-one.iml
-
-# some libs
-lib/hamcrest*
-lib/junit*
-
 # Eclipse IDE files
 .classpath
 .project
