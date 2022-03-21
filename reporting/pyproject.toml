@@ -1,0 +1,42 @@
+[tool.poetry]
+name = "onetwo-reporting"
+version = "1.0.0"
+description = ""
+authors = ["Thomas Schmitt <t.e.schmitt@gmail.com>", "Ibrahim Varli <varli.ibrahim@icloud.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.6.2"
+click = "^8.0.4"
+questionary = "^1.10.0"
+pandas = "^1.1.0"
+seaborn = "^0.11.2"
+
+[tool.poetry.dev-dependencies]
+black = "^22.1.0"
+coverage = "^6.2"
+mypy = "^0.940"
+pre-commit = "^2.17.0"
+pyproject-flake8 = "^0.0.1-alpha.2"
+pytest = "^7.0.1"
+pytest-mock = ">=3.6.1"
+
+[tool.coverage.run]
+omit = [".*", "*/site-packages/*", "*/tests/*"]
+
+# we'll put this here for the future
+# [tool.coverage.report]
+# fail_under = 100
+
+[tool.black]
+line-length = 120
+exclude = ".git, .mypy_cache, .pytest_cache, .idea, output"
+
+[tool.flake8]
+max-line-length = 120
+exclude = ".git, .mypy_cache, .pytest_cache, output"
+per-file-ignores = "__init__.py:F401"
+
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
