@@ -4,6 +4,7 @@
  */
 package movement;
 
+import core.*;
 import input.ExternalMovementReader;
 
 import java.util.HashMap;
@@ -13,11 +14,6 @@ import java.util.Map;
 import java.util.Queue;
 
 import util.Tuple;
-
-import core.Coord;
-import core.DTNSim;
-import core.Settings;
-import core.SimClock;
 
 /**
  * Movement model that uses external data of node locations.
@@ -29,7 +25,15 @@ public class ExternalMovement extends MovementModel {
 	public static final String MOVEMENT_FILE_S = "file";
 	/** number of preloaded intervals per preload run -setting id ({@value})*/
 	public static final String NROF_PRELOAD_S = "nrofPreload";
+	/** minimum size of read-ahead buffer ({@value}) */
+	public static final String READ_AHEAD_BUFFER_MIN_S = "readAheadBufferMin";
+	/** miximum size of read-ahead buffer ({@value}) */
+	public static final String READ_AHEAD_BUFFER_MAX_S = "readAheadBufferMax";
 
+	/** default minimum read-ahead buffer size */
+	public static final int DEF_READ_AHEAD_BUFFER_MIN = 10;
+	/** default maximum read-ahead buffer size */
+	public static final int DEF_READ_AHEAD_BUFFER_MAX = 100;
 	/** default initial location for excess nodes */
 	private static final Coord DEF_INIT_LOC = new Coord(0,0);
 	private static ExternalMovementReader reader;
@@ -82,7 +86,15 @@ public class ExternalMovement extends MovementModel {
 			Settings s = new Settings(EXTERNAL_MOVEMENT_NS);
 			idMapping = new HashMap<String, ExternalMovement>();
 			inputFileName = s.getSetting(MOVEMENT_FILE_S);
-			reader = new ExternalMovementReader(inputFileName);
+
+			/* get the buffer settings */
+			int readAheadBufferMin = s.getInt(READ_AHEAD_BUFFER_MIN_S, DEF_READ_AHEAD_BUFFER_MIN);
+			int readAheadBufferMax = s.getInt(READ_AHEAD_BUFFER_MAX_S, DEF_READ_AHEAD_BUFFER_MAX);
+			/* provide the scenario endTime so the thread can terminate itself */
+			s.setNameSpace(SimScenario.SCENARIO_NS);
+			double endTime = s.getDouble(SimScenario.END_TIME_S);
+
+			reader = new ExternalMovementReader(inputFileName, endTime, readAheadBufferMin, readAheadBufferMax);
 
 			initLocations = reader.readNextMovements();
 			initTime = reader.getLastTimeStamp();
